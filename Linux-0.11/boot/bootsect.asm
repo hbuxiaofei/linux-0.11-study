@@ -31,40 +31,43 @@ SYSSEG   equ 0x1000			; system loaded at 0x10000 (65536).
 ENDSEG   equ SYSSEG + SYSSIZE		; where to stop loading
 
 ; ROOT_DEV:	0x000 - same type of floppy as boot.
-;		0x301 - first partition on first drive etc
-ROOT_DEV equ 0x306
-[section .s16]
-[BITS 16]
+;           0x301 - first partition on first drive etc
+ROOT_DEV equ 0x306          ; 第2个盘的第1个分区
+[SECTION .s16code]          ; 16位代码段
+[BITS 16]                   ; 处理器模式16位, 默认的操作数是16位
 _start:
-	mov	ax,BOOTSEG
+	mov	ax,BOOTSEG          ; 将 ds 段寄存器置为 0x07c0
 	mov	ds,ax
-	mov	ax,INITSEG
+	mov	ax,INITSEG          ; 将 es 段寄存器置为 0x9000
 	mov	es,ax
-	mov	cx,256
-	sub	si,si
-	sub	di,di
-	rep 
-	movsw
-	jmp	INITSEG:go
-go:	mov	ax,cs
+	mov	cx,256              ; 动计数值=256 字(word)
+	sub	si,si               ; 源地地址 ds:si = 0x07C0:0x0000
+	sub	di,di               ; 目的地址 es:di = 0x9000:0x0000
+	rep movsw               ; 重复执行 movsw, 直到 cx = 0 
+                            ; movsw: 移动 1 个字(word), 1 word = 2 byte  
+	jmp	INITSEG:go          ; 长跳转, cs 将变为 0x90000
+go:	mov	ax,cs               ; 将 cs、ds、es 和 ss 都置成移动后代码所在的段处(0x9000)
 	mov	ds,ax
 	mov	es,ax
-; put stack at 0x9ff00.
+; put stack at 0x9ff00.     ; 将堆栈指针 sp 指向 0x9ff00(即 0x9000:0xff00)处
 	mov	ss,ax
-	mov	sp,0xFF00		; arbitrary value >>512
+	mov	sp,0xFF00		    ; 从 0x90200 地址开始处还要放置 setup 程序
+                            ; 而 setup 程序大约为 4 个扇区，因此 sp 要指向大
+                            ; 于（0x200 + 0x200 * 4 + 堆栈大小）处。
 
 ; load the setup-sectors directly after the bootblock.
 ; Note that 'es' is already set up.
 
 load_setup:
-	mov	dx,0x0000		; drive 0, head 0
-	mov	cx,0x0002		; sector 2, track 0
-	mov	bx,0x0200		; address = 512, in INITSEG
-	mov	ax,0x0200+SETUPLEN	; service 2, nr of sectors
-	int	0x13			; read it
-	jnc	ok_load_setup		; ok - continue
+	mov	dx,0x0000		    ; drive 0, head 0
+	mov	cx,0x0002		    ; sector 2, track 0
+	mov	bx,0x0200		    ; es:bx 指向数据缓冲区； 
+                            ; es 已经设置好了 (在移动代码时 es 已经指向目的段地址处 0x9000)
+	mov	ax,0x0200+SETUPLEN	; ah=0x02 - 读磁盘扇区指令；al=SETUPLEN - 需要读出的扇区数量
+	int	0x13	   		    ; BIOS 中断 0x13 进行数据读取, 如果出错则 CF 标志置位
+	jnc	ok_load_setup		; CF 未置位则读取成功, 跳转到 ok_load_setup
 	mov	dx,0x0000
-	mov	ax,0x0000		; reset the diskette
+	mov	ax,0x0000		    ; reset the diskette
 	int	0x13
 	jmp	load_setup
 

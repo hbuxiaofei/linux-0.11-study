@@ -2,5 +2,5 @@
 
 make VERBOSE=1
 
-..\bochs-2.6.10-win64\bochs-win64.exe -f ..\bochs-2.6.10-win64\bochs.conf -q
+..\bochs-2.6.10-win64\bochsdbg-win64.exe -f ..\bochs-2.6.10-win64\bochs.conf -q
 
