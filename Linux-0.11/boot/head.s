@@ -4,35 +4,41 @@
  *  (C) 1991  Linus Torvalds
  */
 
-/*
- *  head.s contains the 32-bit startup code.
- *
- * NOTE!!! Startup happens at absolute address 0x00000000, which is also where
- * the page directory will exist. The startup code will be overwritten by
- * the page directory.
- */
+# head.s 含有 32 位启动代码。
+# 注意!!! 32 位启动代码是从绝对地址 0x00000000 开始的
+# 这里也同样是页目录将存在的地方，
+# 因此这里的启动代码将被页目录覆盖掉
+
 .text
 .globl _idt,_gdt,_pg_dir,_tmp_floppy_area
+
+# 页目录将会存放在这里
 _pg_dir:
+
 .globl startup_32
 startup_32:
+	# (mov)l用于32位, eax为32位寄存器, ax是eax的低16位
+	# 0x10 的含义是请求 特权级0(位0-1=0)、选择全局描述符表(位2=0)、选择表中第2项(位3-15=2)
+	# gdt表的第2项即 数据段
 	movl $0x10,%eax
 	mov %ax,%ds
 	mov %ax,%es
 	mov %ax,%fs
 	mov %ax,%gs
+
+	# 表示 _stack_start -> ss:esp，设置系统堆栈, _stack_start 定义在 kernel/sched.c
 	lss _stack_start,%esp
 	call _setup_idt
 	call _setup_gdt
-	movl $0x10,%eax		# reload all the segment registers
-	mov %ax,%ds		# after changing gdt. CS was already
-	mov %ax,%es		# reloaded in 'setup_gdt'
+	movl $0x10,%eax		   # reload all the segment registers
+	mov %ax,%ds		       # after changing gdt. CS was already
+	mov %ax,%es		       # reloaded in 'setup_gdt'
 	mov %ax,%fs
 	mov %ax,%gs
 	lss _stack_start,%esp
 	xorl %eax,%eax
-1:	incl %eax		# check that A20 really IS enabled
-	movl %eax,0x000000	# loop forever if it isn't
+1:	incl %eax		       # check that A20 really IS enabled
+	movl %eax,0x000000	   # loop forever if it isn't
 	cmpl %eax,0x100000
 	je 1b
 
@@ -78,16 +84,18 @@ check_x87:
  *  written by the page tables.
  */
 _setup_idt:
-	lea ignore_int,%edx
-	movl $0x00080000,%eax
+	# ignore_int 的有效地址写入 edx 寄存器, 指向一个只报错误的哑中断程序
+	lea ignore_int, %edx
+	movl $0x00080000, %eax
 	movw %dx,%ax		/* selector = 0x0008 = cs */
 	movw $0x8E00,%dx	/* interrupt gate - dpl=0, present */
 
 	lea _idt,%edi
 	mov $256,%ecx
 rp_sidt:
-	movl %eax,(%edi)
-	movl %edx,4(%edi)
+	movl %eax, (%edi)
+	# 将 edx 寄存器中的值存放在 edi 寄存器指向的位置之后4个字节的位置中
+	movl %edx, 4(%edi)
 	addl $8,%edi
 	dec %ecx
 	jne rp_sidt
@@ -224,16 +232,21 @@ setup_paging:
 idt_descr:
 	.word 256*8-1		# idt contains 256 entries
 	.long _idt
+
 .align 2
 .word 0
 gdt_descr:
 	.word 256*8-1		# so does gdt (not that that's any
 	.long _gdt		# magic number, but it works for me :^)
 
-	.align 8
-_idt:	.fill 256,8,0		# idt is uninitialized
+.align 8
+_idt:
+	# 默认中断描述符表未初始化
+	# 256 * 8 个字节共64bit，全部都是 0
+	.fill 256,8,0		# idt is uninitialized
 
-_gdt:	.quad 0x0000000000000000	/* NULL descriptor */
+_gdt:
+	.quad 0x0000000000000000	/* NULL descriptor */
 	.quad 0x00c09a0000000fff	/* 16Mb */
 	.quad 0x00c0920000000fff	/* 16Mb */
 	.quad 0x0000000000000000	/* TEMPORARY - don't use */

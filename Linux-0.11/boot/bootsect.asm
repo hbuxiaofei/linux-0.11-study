@@ -40,7 +40,7 @@ _start:
 	mov	ds,ax
 	mov	ax,INITSEG          ; 将 es 段寄存器置为 0x9000
 	mov	es,ax
-	mov	cx,256              ; 动计数值=256 字(word)
+	mov	cx,256              ; 移动计数值=256 字(word)
 	sub	si,si               ; 源地地址 ds:si = 0x07C0:0x0000
 	sub	di,di               ; 目的地址 es:di = 0x9000:0x0000
 	rep movsw               ; 重复执行 movsw, 直到 cx = 0 
@@ -75,31 +75,31 @@ ok_load_setup:
 
 ; Get disk drive parameters, specifically nr of sectors/track
 
-	mov	dl,0x00
+	mov	dl,0x00         ; 驱动器号（如果是硬盘则要置位7 为 1）
 	mov	ax,0x0800		; AH=8 is get drive parameters
 	int	0x13
 	mov	ch,0x00
 ;	seg cs
-	mov	[sectors],cx
+	mov	[sectors],cx    ; 保存每磁道扇区数
 	mov	ax,INITSEG
 	mov	es,ax
 
-; Print some inane message
+; Print some inane message, 显示一些信息('Loading system ...'回车换行，共 24 个字符)。
 
-	mov	ah,0x03		; read cursor pos
-	xor	bh,bh
+	mov	ah,0x03         ; read cursor pos
+	xor	bh,bh           ; bh清零
 	int	0x10
 	
-	mov	cx,24
-	mov	bx,0x0007		; page 0, attribute 7 (normal)
-	mov	bp,msg1
 	mov	ax,0x1301		; write string, move cursor
+	mov	bx,0x0007		; page 0, attribute 7 (normal)
+	mov	cx,24           ; 共 24 个字符
+	mov	bp,msg1         ; 指向要显示的字符串
 	int	0x10
 
 ; ok, we've written the message, now
 ; we want to load the system (at 0x10000)
 
-	mov	ax,SYSSEG
+	mov	ax,SYSSEG   ; SYSSEG = 0x1000
 	mov	es,ax		; segment of 0x010000
 	call	read_it
 	call	kill_motor
@@ -145,9 +145,10 @@ track:	dw 0			; current track
 
 read_it:
 	mov ax,es
-	test ax,0x0fff
-die:	jne die			; es must be at 64kB boundary
-	xor bx,bx		; bx is starting address within segment
+	test ax,0x0fff      ; 进行与操作, 测试 es<<4 为 64KB 的整数倍
+die:
+	jne die		  	    ; 上一步不等于0，则ZF=0，则进行跳转
+	xor bx,bx		    ; 异或, 清除bx寄存器
 rp_read:
 	mov ax,es
 	cmp ax,ENDSEG		; have we loaded all yet?
@@ -155,8 +156,8 @@ rp_read:
 	ret
 ok1_read:
 ;	seg cs
-	mov ax,[sectors]
-	sub ax,[sread]
+	mov ax,[sectors]    ; 取每磁道扇区数
+	sub ax,[sread]      ; 减去当前磁道已读扇区数
 	mov cx,ax
 	shl cx,9
 	add cx,bx
