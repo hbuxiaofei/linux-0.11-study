@@ -86,6 +86,8 @@ check_x87:
 _setup_idt:
 	# ignore_int 的有效地址写入 edx 寄存器, 指向一个只报错误的哑中断程序
 	lea ignore_int, %edx
+
+	# selector = 0x0008 = cs 段选择符为第8项 代码段
 	movl $0x00080000, %eax
 	movw %dx,%ax		/* selector = 0x0008 = cs */
 	movw $0x8E00,%dx	/* interrupt gate - dpl=0, present */
@@ -143,10 +145,15 @@ _tmp_floppy_area:
 	.fill 1024,1,0
 
 after_page_tables:
-	pushl $0		# These are the parameters to main :-)
+	# 这些是调用 main 程序的参数
 	pushl $0
 	pushl $0
-	pushl $L6		# return address for main, if it decides to.
+	pushl $0
+
+	# main 函数的返回地址，如果真的会返回的话
+	pushl $L6
+
+	# 后面执行ret指令时就会将 main 程序的地址弹出堆栈，并去执行 main 程序去了
 	pushl $_start
 	jmp setup_paging
 L6:
@@ -164,19 +171,24 @@ ignore_int:
 	push %ds
 	push %es
 	push %fs
+
 	movl $0x10,%eax
 	mov %ax,%ds
 	mov %ax,%es
 	mov %ax,%fs
+
 	pushl $int_msg
 	call _printk
 	popl %eax
+
 	pop %fs
 	pop %es
 	pop %ds
 	popl %edx
 	popl %ecx
 	popl %eax
+
+	# 中断返回
 	iret
 
 
@@ -225,6 +237,10 @@ setup_paging:
 	movl %cr0,%eax
 	orl $0x80000000,%eax
 	movl %eax,%cr0		/* set paging (PG) bit */
+
+	# 在改变分页处理标志后要求使用转移指令刷新预取指令队列，这里用的是返回指令 ret
+	# 该返回指令的另一个作用是将堆栈中的 main 程序的地址弹出，并开始运行 /init/main.c 程序
+	# 本程序到此真正结束了
 	ret			/* this also flushes prefetch-queue */
 
 .align 2
