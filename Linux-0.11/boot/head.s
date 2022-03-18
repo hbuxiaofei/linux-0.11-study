@@ -18,29 +18,33 @@ _pg_dir:
 .globl startup_32
 startup_32:
 	# (mov)l用于32位, eax为32位寄存器, ax是eax的低16位
-	# 0x10 的含义是请求 特权级0(位0-1=0)、选择全局描述符表(位2=0)、选择表中第2项(位3-15=2)
+	# 0x10(0001,0000) 的含义是请求 特权级0(位0-1=0)、选择全局描述符表(位2=0)、选择表中第2项(位3-15=2)
 	# gdt表的第2项即 数据段
 	movl $0x10,%eax
 	mov %ax,%ds
 	mov %ax,%es
 	mov %ax,%fs
 	mov %ax,%gs
-
 	# 表示 _stack_start -> ss:esp，设置系统堆栈, _stack_start 定义在 kernel/sched.c
 	lss _stack_start,%esp
+
 	call _setup_idt
 	call _setup_gdt
+
 	movl $0x10,%eax		   # reload all the segment registers
 	mov %ax,%ds		       # after changing gdt. CS was already
 	mov %ax,%es		       # reloaded in 'setup_gdt'
 	mov %ax,%fs
 	mov %ax,%gs
 	lss _stack_start,%esp
+
 	xorl %eax,%eax
 1:	incl %eax		       # check that A20 really IS enabled
-	movl %eax,0x000000	   # loop forever if it isn't
-	cmpl %eax,0x100000
-	je 1b
+	movl %eax,0x000000	   # 向内存地址 0x000000 处写入任意数值
+	cmpl %eax,0x100000     # 判断内存地址 0x100000(1M)处是否也是这个数值
+
+	je 1b                  # 如果一直相同的话，就一直较下去，也即死循环、死机
+	                       # 表示地址 A20 线没有选通，内核就不能使用 1M 以上内存
 
 /*
  * NOTE! 486 should set bit 16, to check for write-protect in supervisor
@@ -48,10 +52,10 @@ startup_32:
  * 486 users probably want to set the NE (#5) bit also, so as to use
  * int 16 for math errors.
  */
-	movl %cr0,%eax		# check math chip
+	movl %cr0,%eax		    # check math chip
 	andl $0x80000011,%eax	# Save PG,PE,ET
 /* "orl $0x10020,%eax" here for 486 might be good */
-	orl $2,%eax		# set MP
+	orl $2,%eax		        # set MP
 	movl %eax,%cr0
 	call check_x87
 	jmp after_page_tables
@@ -90,6 +94,9 @@ _setup_idt:
 	# selector = 0x0008 = cs 段选择符为第8项 代码段
 	movl $0x00080000, %eax
 	movw %dx,%ax		/* selector = 0x0008 = cs */
+
+	# 47位 段存在标志P, 用于标识此段是否存在于内存中, 为虚拟机存储提供支持 0x80
+	# 40 ~ 43位 段描述符类型标志TYPE, 中断描述符对应的类型标志为0111(0x0E)
 	movw $0x8E00,%dx	/* interrupt gate - dpl=0, present */
 
 	lea _idt,%edi
@@ -221,13 +228,23 @@ setup_paging:
 	movl $1024*5,%ecx		/* 5 pages - pg_dir+4 page tables */
 	xorl %eax,%eax
 	xorl %edi,%edi			/* pg_dir is at 0x000 */
+
+	# cld指令的解释：与cld相对应的指令是std，二者均是用来操作方向标志位DF（Direction Flag）
+	# cld使DF复位，即是让DF=0，std使DF置位，即DF=1. 这两个指令用于串操作指令中
+	# 通过执行cld或std指令可以控制方向标志DF，决定内存地址是增大（DF=0，向高地址增加）还是减小（DF=1，向地地址减小）
+	# cld指令即告诉程序si di向内存地址增大的方向走
+	# rep指令表示紧跟着下面的一条指令重复执行，直到ecx的值是零
+	# stosl 将 eax 的值传送到 edi 所指向的内存
 	cld;rep;stosl
-	movl $pg0+7,_pg_dir		/* set present bit/user r/w */
-	movl $pg1+7,_pg_dir+4		/*  --------- " " --------- */
-	movl $pg2+7,_pg_dir+8		/*  --------- " " --------- */
-	movl $pg3+7,_pg_dir+12		/*  --------- " " --------- */
+
+	# 第1个页表所在的地址 = 0x00001007 & 0xfffff000 = 0x1000
+	# 第1个页表的属性标志 = 0x00001007 & 0x00000fff = 0x07，表示该页存在、用户可读写
+	movl $pg0+7,_pg_dir         /* set present bit/user r/w */
+	movl $pg1+7,_pg_dir+4       /*  --------- " " --------- */
+	movl $pg2+7,_pg_dir+8       /*  --------- " " --------- */
+	movl $pg3+7,_pg_dir+12      /*  --------- " " --------- */
 	movl $pg3+4092,%edi
-	movl $0xfff007,%eax		/*  16Mb - 4096 + 7 (r/w user,p) */
+	movl $0xfff007,%eax         /*  16Mb - 4096 + 7 (r/w user,p) */
 	std
 1:	stosl			/* fill pages backwards - more efficient :-) */
 	subl $0x1000,%eax
@@ -262,8 +279,9 @@ _idt:
 	.fill 256,8,0		# idt is uninitialized
 
 _gdt:
+	# (0-nul, 1-cs, 2-ds, 3-sys, 4-TSS0, 5-LDT0, 6-TSS1, 7-LDT1, 8-TSS2 etc...)
 	.quad 0x0000000000000000	/* NULL descriptor */
-	.quad 0x00c09a0000000fff	/* 16Mb */
-	.quad 0x00c0920000000fff	/* 16Mb */
+	.quad 0x00c09a0000000fff	/* 16Mb  0x08代码段最大长度 16M */
+	.quad 0x00c0920000000fff	/* 16Mb  0x10数据段最大长度 16M */
 	.quad 0x0000000000000000	/* TEMPORARY - don't use */
 	.fill 252,8,0			/* space for LDT's and TSS's etc */
