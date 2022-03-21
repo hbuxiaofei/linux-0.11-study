@@ -245,15 +245,15 @@ setup_paging:
 	movl $pg3+7,_pg_dir+12      /*  --------- " " --------- */
 	movl $pg3+4092,%edi
 	movl $0xfff007,%eax         /*  16Mb - 4096 + 7 (r/w user,p) */
-	std
-1:	stosl			/* fill pages backwards - more efficient :-) */
+	std                    /* 置方向标志1，DF=1，地址从高到低 */
+1:	stosl                  /* eax -> es:edi, fill pages backwards - more efficient :-) */
 	subl $0x1000,%eax
 	jge 1b
-	xorl %eax,%eax		/* pg_dir is at 0x0000 */
-	movl %eax,%cr3		/* cr3 - page directory start */
+	xorl %eax,%eax         /* pg_dir is at 0x0000 */
+	movl %eax,%cr3         /* cr3 - page directory start */
 	movl %cr0,%eax
-	orl $0x80000000,%eax
-	movl %eax,%cr0		/* set paging (PG) bit */
+	orl $0x80000000,%eax   /* cr0的位31是分页标志 */
+	movl %eax,%cr0         /* set paging (PG) bit */
 
 	# 在改变分页处理标志后要求使用转移指令刷新预取指令队列，这里用的是返回指令 ret
 	# 该返回指令的另一个作用是将堆栈中的 main 程序的地址弹出，并开始运行 /init/main.c 程序
@@ -281,7 +281,16 @@ _idt:
 _gdt:
 	# (0-nul, 1-cs, 2-ds, 3-sys, 4-TSS0, 5-LDT0, 6-TSS1, 7-LDT1, 8-TSS2 etc...)
 	.quad 0x0000000000000000	/* NULL descriptor */
-	.quad 0x00c09a0000000fff	/* 16Mb  0x08代码段最大长度 16M */
-	.quad 0x00c0920000000fff	/* 16Mb  0x10数据段最大长度 16M */
+
+	# G=1,D/B=1
+	# P=1,S=1,TYPE=1010
+	# 基地址为0
+	.quad 0x00c09a0000000fff	/* 16Mb  代码段最大长度 16M */
+
+	# G=1,D/B=1
+	# P=1,S=1,TYPE=0010
+	# 基地址为0
+	.quad 0x00c0920000000fff	/* 16Mb  数据段最大长度 16M */
+
 	.quad 0x0000000000000000	/* TEMPORARY - don't use */
 	.fill 252,8,0			/* space for LDT's and TSS's etc */
