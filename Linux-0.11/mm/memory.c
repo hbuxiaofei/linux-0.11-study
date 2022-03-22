@@ -59,6 +59,9 @@ static unsigned char mem_map [ PAGING_PAGES ] = {0,};
 /*
  * Get physical address of first (actually last :-) free page, and mark it
  * used. If no free pages left, return 0.
+ *
+ * 获取首个(实际上是最后1 个:-)空闲页面，并标记为已使用。
+ * 如果没有空闲页面，就返回0。
  */
 unsigned long get_free_page(void)
 {
@@ -85,10 +88,14 @@ return __res;
 /*
  * Free a page of memory at physical address 'addr'. Used by
  * 'free_page_tables()'
+ *
+ * 释放物理地址addr 开始的一页面内存。
  */
 void free_page(unsigned long addr)
 {
+	// 1MB 以下的内存空间用于内核程序和缓冲，不作为分配页面的内存空间。
 	if (addr < LOW_MEM) return;
+
 	if (addr >= HIGH_MEMORY)
 		panic("trying to free nonexistent page");
 	addr -= LOW_MEM;
@@ -101,6 +108,8 @@ void free_page(unsigned long addr)
 /*
  * This function frees a continuos block of page tables, as needed
  * by 'exit()'. As does copy_page_tables(), this handles only 4Mb blocks.
+ *
+ * 释放页表连续的内存块
  */
 int free_page_tables(unsigned long from,unsigned long size)
 {
@@ -146,6 +155,8 @@ int free_page_tables(unsigned long from,unsigned long size)
  * doesn't take any more memory - we don't copy-on-write in the low
  * 1 Mb-range, so the pages can be shared with the kernel. Thus the
  * special case for nr=xxxx.
+ *
+ * 目的则是为了将当前源目录项from page_table，复制到目的页表to page_table中。
  */
 int copy_page_tables(unsigned long from,unsigned long to,long size)
 {
@@ -193,6 +204,9 @@ int copy_page_tables(unsigned long from,unsigned long to,long size)
  * It returns the physical address of the page gotten, 0 if
  * out of memory (either when trying to access page-table or
  * page.)
+ *
+ * 把一物理内存页面映射到指定的线性地址处。
+ * 主要工作是在页目录和页表中设置指定页面的信息。若成功则返回页面地址。
  */
 unsigned long put_page(unsigned long page,unsigned long address)
 {
@@ -218,6 +232,10 @@ unsigned long put_page(unsigned long page,unsigned long address)
 	return page;
 }
 
+/*
+ * 取消写保护页面函数。用于页异常中断过程中写保护异常的处理（写时复制）。
+ * 输入参数为页表项指针。
+ */
 void un_wp_page(unsigned long * table_entry)
 {
 	unsigned long old_page,new_page;
@@ -243,6 +261,8 @@ void un_wp_page(unsigned long * table_entry)
  * and decrementing the shared-page counter for the old page.
  *
  * If it's in code space we exit with a segment error.
+ *
+ * 写共享页面时，需复制页面（写时复制）
  */
 void do_wp_page(unsigned long error_code,unsigned long address)
 {
@@ -258,6 +278,10 @@ void do_wp_page(unsigned long error_code,unsigned long address)
 
 }
 
+/*
+ * 写页面验证。
+ * 若页面不可写，则复制页面。
+ */
 void write_verify(unsigned long address)
 {
 	unsigned long page;
@@ -271,6 +295,11 @@ void write_verify(unsigned long address)
 	return;
 }
 
+/*
+ * 取得一页空闲内存并映射到指定线性地址处。
+ * 与get_free_page()不同。get_free_page()仅是申请取得了主内存区的一页物理内存。
+ * 而该函数不仅是获取到一页物理内存页面，还进一步调用put_page()，将物理页面映射到指定的线性地址处
+ */
 void get_empty_page(unsigned long address)
 {
 	unsigned long tmp;
@@ -288,6 +317,13 @@ void get_empty_page(unsigned long address)
  *
  * NOTE! This assumes we have checked that p != current, and that they
  * share the same executable.
+ *
+ * 在任务"p"中检查位于地址"address"处的页面，看页面是否存在，是否干净。
+ * 如果是干净的话，就与当前任务共享。
+ * 注意: 这里我们已假定p !=当前任务，并且它们共享同一个执行程序。
+ * 尝试对进程指定地址处的页面进行共享操作。
+ * 同时还验证指定的地址处是否已经申请了页面，若是则出错，死机。
+ * 返回 1-成功，0-失败。
  */
 static int try_to_share(unsigned long address, struct task_struct * p)
 {
@@ -341,6 +377,13 @@ static int try_to_share(unsigned long address, struct task_struct * p)
  *
  * We first check if it is at all feasible by checking executable->i_count.
  * It should be >1 if there are other tasks sharing this inode.
+ *
+ * 试图找到一个进程，它可以与当前进程共享页面。
+ * 参数address 是当前数据空间中期望共享的某页面地址。
+ * 首先我们通过检测executable->i_count 来查证是否可行。
+ * 如果有其它任务已共享该inode，则它应该大于1。
+ * 共享页面。在缺页处理时看看能否共享页面。
+ * 返回 1-成功，0-失败。
  */
 static int share_page(unsigned long address)
 {
@@ -363,7 +406,11 @@ static int share_page(unsigned long address)
 	return 0;
 }
 
-void do_no_page(unsigned long error_code,unsigned long address)
+/*
+ * 页异常中断处理调用的函数。处理缺页异常情况。在page.s 程序中被调用。
+ * 参数error_code 是由CPU 自动产生，address 是页面线性地址。
+ */
+void do_no_page(unsigned long error_code, unsigned long address)
 {
 	int nr[4];
 	unsigned long tmp;
@@ -397,6 +444,13 @@ void do_no_page(unsigned long error_code,unsigned long address)
 	oom();
 }
 
+/*
+ * 物理内存初始化
+ * 参数：start_mem - 可用作分页处理的物理内存起始位置（已去除RAMDISK 所占内存空间等）。
+ *       end_mem   - 实际物理内存最大地址。
+ *  在该版的linux 内核中，最多能使用16Mb 的内存，大于16Mb 的内存将不于考虑，弃置不用。
+ *  0 - 1Mb 内存空间用于内核系统（其实是0-640Kb）。
+ */
 void mem_init(long start_mem, long end_mem)
 {
 	int i;
@@ -411,6 +465,9 @@ void mem_init(long start_mem, long end_mem)
 		mem_map[i++]=0;
 }
 
+/*
+ * 计算内存空闲页面数并显示
+ */
 void calc_mem(void)
 {
 	int i,j,k,free=0;
